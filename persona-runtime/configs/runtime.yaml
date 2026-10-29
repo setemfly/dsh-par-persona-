@@ -1,0 +1,25 @@
+# Runtime config. Every value here is a default from spec §8.5 / §20.4.
+agent_id: "linxi"
+persona: "configs/personas/linxi.yaml"
+providers_file: "configs/providers.local.yaml"
+provider: "deepseek"        # ollama | deepseek | openai | anthropic | fake
+model: null                 # null => use the provider entry's model
+temperature: 0.75
+max_tokens: 900
+data_dir: "data"
+user_id: "local_user"
+
+memory:
+  recall_k: 12
+  importance_floor: 0.35
+  consolidate_every_turns: 1
+
+affect:
+  enabled: true
+  appraisal: "heuristic"    # heuristic | llm
+
+policy:
+  approval_ttl_s: 600
+  max_steps_per_turn: 8
+  max_tool_calls: 12
+  untrusted_content_requires_reapproval: true

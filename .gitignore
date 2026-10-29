@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data: local DBs, generated audio, smoke sandboxes
+persona-runtime/data/
+.smoke/
+*.db
+
+# Local secrets / machine-specific provider config
+persona-runtime/configs/providers.local.yaml
+
+# Node / plugin build output
+node_modules/
+*.tgz
+
+# OS noise
+.DS_Store
+Thumbs.db
+pytest-of-*/

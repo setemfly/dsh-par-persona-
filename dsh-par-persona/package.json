@@ -1,0 +1,32 @@
+{
+  "name": "dsh-par-persona",
+  "version": "0.1.0",
+  "description": "把 persona-runtime（林汐）接进 DeepSeek Harness：par_chat / par_status / par_audit_verify 三个工具，自动拉起本地 Python sidecar。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "persona",
+    "par"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}
