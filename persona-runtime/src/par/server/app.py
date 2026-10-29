@@ -60,6 +60,10 @@ class Runtime:
             "memories": [{"id": m.memory_id, "text": m.text, "kind": m.kind} for m in result.memories[:5]],
             "audit_seq": result.audit_seq,
             "verifier_ok": result.verifier.ok if result.verifier else True,
+            "intent": result.intent,
+            "gate_verdict": result.gate_verdict,
+            "executed": result.executed,
+            "deviation": result.deviation,
         }
 
 
@@ -132,6 +136,8 @@ def _make_handler(runtime: Runtime) -> type[BaseHTTPRequestHandler]:
                         "audit_head": a.audit.head(),
                     },
                 )
+            elif self.path == "/api/tools":
+                self._json(200, {"tools": runtime.agent.toolbox.describe()})
             elif self.path == "/api/audit/verify":
                 a = runtime.agent
                 try:

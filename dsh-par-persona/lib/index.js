@@ -209,6 +209,10 @@ class ParSidecar {
     return this.#request('/api/audit/verify', { timeoutMs: 30000 })
   }
 
+  async tools() {
+    return this.#request('/api/tools', { timeoutMs: 10000 })
+  }
+
   async dispose() {
     this.disposed = true
     const child = this.child
@@ -233,6 +237,12 @@ function labelLines(labels) {
 function formatChat(value) {
   const lines = [value.reply]
   if (value.labels?.length) lines.push('', `[affect] ${value.labels.join(' ')}`)
+  const pipeline = [`intent=${value.intent || 'chat'}`, `gate=${value.gate || '(none)'}`]
+  if (value.executed?.length) {
+    pipeline.push(`steps=${value.executed.map((s) => `${s.step_id}:${s.status}`).join(',')}`)
+  }
+  if (value.deviation) pipeline.push(`deviation=${value.deviation}`)
+  lines.push('', `[pipeline] ${pipeline.join(' ')}`)
   if (value.memories?.length) {
     lines.push('', '[recall]')
     for (const memory of value.memories.slice(0, 5)) lines.push(`- (${memory.kind}) ${memory.text}`)
@@ -272,6 +282,17 @@ export function apply(ctx, config = {}) {
           properties: {
             reply: { type: 'string', required: true },
             labels: { type: 'array', items: { type: 'string' } },
+            intent: { type: 'string' },
+            gate: { type: 'string' },
+            deviation: { type: 'string' },
+            executed: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { step_id: { type: 'string' }, status: { type: 'string' } },
+              },
+            },
             memories: {
               type: 'array',
               items: {
@@ -292,6 +313,10 @@ export function apply(ctx, config = {}) {
         return {
           reply: String(raw.reply || ''),
           labels: Object.entries(raw.labels || {}).map(([k, v]) => `${k}=${Number(v).toFixed(2)}`),
+          intent: String(raw.intent || 'chat'),
+          gate: raw.gate_verdict == null ? undefined : String(raw.gate_verdict),
+          deviation: raw.deviation == null ? undefined : String(raw.deviation),
+          executed: (raw.executed || []).map((s) => ({ step_id: String(s.step_id || ''), status: String(s.status || '') })),
           memories: (raw.memories || []).slice(0, 5).map((m) => ({ text: String(m.text || ''), kind: String(m.kind || '') })),
           audit_seq: Number(raw.audit_seq || 0),
           verifier_ok: Boolean(raw.verifier_ok),
@@ -342,6 +367,54 @@ export function apply(ctx, config = {}) {
             .map(([k, v]) => `${k}=${Number(v).toFixed(2)}`),
           audit_seq: Number(state.audit_head?.seq || 0),
           audit_hash: String(state.audit_head?.hash || ''),
+        }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'par_tools',
+      description: '列出林汐运行时当前可用的内置工具及其副作用等级（只读）。用于判断哪类请求（时间/算术/读工作区文件）会被规划成真实工具调用。',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            tools: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string' },
+                  side_effect: { type: 'string' },
+                  requires_approval: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => [
+          {
+            type: 'text',
+            text: value.tools.length
+              ? value.tools.map((t) => `- ${t.name} (${t.side_effect}${t.requires_approval ? ', needs approval' : ''})`).join('\\n')
+              : 'par-persona: no tools registered',
+          },
+        ],
+      },
+      isConcurrencySafe: () => true,
+      async execute() {
+        if (!(await sidecar.health(800))) await sidecar.ensure()
+        const body = await sidecar.tools()
+        return {
+          tools: (body.tools || []).map((t) => ({
+            name: String(t.name || ''),
+            side_effect: String(t.side_effect || 'none'),
+            requires_approval: Boolean(t.requires_approval),
+          })),
         }
       },
     }),

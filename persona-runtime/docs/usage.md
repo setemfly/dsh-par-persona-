@@ -1,4 +1,4 @@
-# 使用手册（v0.1）
+# 使用手册（v0.2）
 
 ## 1. 安装
 
@@ -45,12 +45,17 @@ par say "你好"                # 单轮
 par serve --port 7860         # 浏览器 + HTTP
 ```
 
+另有一个 DSH 插件把同一运行时暴露成 `par_chat / par_status / par_tools / par_audit_verify` 四个工具，见 `../../dsh-par-persona/README.md`。它和这三种入口共用同一个 `data/<agent>.db`，所以从 DSH 聊过的内容，`par chat` 里也记得。
+
 `serve` 同时提供：
 
 - `GET /` 内置聊天页（含朗读按钮）
 - `GET /health`、`GET /v1/models`
 - `POST /v1/chat/completions` — OpenAI 兼容，可直接接 OpenAI SDK、DeepSeek Harness 之类客户端
-- `POST /api/chat` — `{message}` → `{reply, labels, memories, audit_seq}`
+- `POST /api/chat` — `{message}` → `{reply, labels, memories, audit_seq, verifier_ok, intent, gate_verdict, executed, deviation}`
+- `GET /api/state` — 人格版本、情绪通道、轮数、审计链头
+- `GET /api/tools` — 当前注册的内置工具（名称、副作用等级）
+- `GET /api/audit/verify` — 重算哈希链；链坏时返回 409
 - `POST /v1/audio/speech` — `{input}` → WAV（Windows SAPI；不可用返回 501）
 
 OpenAI 兼容示例：
@@ -71,6 +76,25 @@ print(client.chat.completions.create(
 ```
 
 注意：这个端点把**一个进程**当**一个会话流**。多用户隔离属于部署层；v0 是单用户本地运行时。
+
+## 4.1 工具、评估与记忆维护
+
+```bash
+par tools list                 # 当前工具与副作用等级
+par eval --file evals/scenarios.yaml   # 9 条离线场景；有失败返回退出码 2
+par memory stats               # 记忆条数
+par memory consolidate         # 把相似 episode 聚成 semantic/reflection
+```
+
+内置工具只有三个，全部只读：
+
+| 工具 | 副作用 | 说明 |
+|---|---|---|
+| `time.now` | none | 本地时间（可传 `tz`） |
+| `calc.eval` | none | 四则/幂运算，AST 白名单，指数 ≤64 |
+| `fs.read` | read | 只读 `<workspace>` 内文件，最多 64 KiB、返回前 4000 字符 |
+
+请求进入编排时先由确定性路由判断意图（时间/算术/读文件/对话），再走门控（`PolicyEngine`）与执行器（幂等、超时、kill switch）。未获批准的计划只会有 `denied`，不会执行。场景说明见 `docs/evals.md`。
 
 ## 5. 人格卡
 

@@ -37,7 +37,7 @@ def _expand(value: Any) -> Any:
 class MemoryConfig(BaseModel):
     recall_k: int = Field(default=12, ge=1, le=50)
     importance_floor: float = Field(default=0.35, ge=0.0, le=1.0)
-    consolidate_every_turns: int = Field(default=1, ge=1)
+    consolidate_every_turns: int = Field(default=20, ge=1)
 
 
 class AffectConfig(BaseModel):
@@ -52,6 +52,20 @@ class PolicyConfig(BaseModel):
     untrusted_content_requires_reapproval: bool = True
 
 
+class ToolsConfig(BaseModel):
+    enabled: bool = True
+    workspace: str = "workspace"
+    max_file_bytes: int = Field(default=64 * 1024, ge=1024, le=10 * 1024 * 1024)
+
+
+class DeviationConfig(BaseModel):
+    enabled: bool = True
+    max_per_hour: int = Field(default=3, ge=0, le=60)
+    cooldown_s: int = Field(default=600, ge=0)
+    min_sustain_s: int = Field(default=60, ge=0)
+    propensity: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
 class RuntimeConfig(BaseModel):
     agent_id: str = "linxi"
     persona: str = "configs/personas/linxi.yaml"
@@ -64,6 +78,8 @@ class RuntimeConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     affect: AffectConfig = Field(default_factory=AffectConfig)
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    deviation: DeviationConfig = Field(default_factory=DeviationConfig)
     user_id: str = "local_user"
 
     # resolved absolute paths, filled by Settings
@@ -87,13 +103,21 @@ _DEFAULTS: dict[str, Any] = {
     "temperature": 0.75,
     "max_tokens": 900,
     "data_dir": "data",
-    "memory": {"recall_k": 12, "importance_floor": 0.35, "consolidate_every_turns": 1},
+    "memory": {"recall_k": 12, "importance_floor": 0.35, "consolidate_every_turns": 20},
     "affect": {"enabled": True, "appraisal": "heuristic"},
     "policy": {
         "approval_ttl_s": 600,
         "max_steps_per_turn": 8,
         "max_tool_calls": 12,
         "untrusted_content_requires_reapproval": True,
+    },
+    "tools": {"enabled": True, "workspace": "workspace", "max_file_bytes": 65536},
+    "deviation": {
+        "enabled": True,
+        "max_per_hour": 3,
+        "cooldown_s": 600,
+        "min_sustain_s": 60,
+        "propensity": 0.35,
     },
     "user_id": "local_user",
 }
@@ -103,7 +127,7 @@ def load_config(path: str | Path) -> RuntimeConfig:
     cfg_path = Path(path).resolve()
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     merged = {**_DEFAULTS, **_expand(raw)}
-    for section in ("memory", "affect", "policy"):
+    for section in ("memory", "affect", "policy", "tools", "deviation"):
         merged[section] = {**_DEFAULTS[section], **(merged.get(section) or {})}
     if not cfg_path.parent.name == "configs":
         root = cfg_path.parent

@@ -200,9 +200,33 @@ def _cmd_memory(args: argparse.Namespace) -> int:
 
     config = load_config(_config_path(args.config))
     store = MemoryStore(config.db_path)
-    print(json.dumps(store.counts(config.agent_id), ensure_ascii=False))
+    if args.action == "consolidate":
+        written = store.consolidate(config.agent_id)
+        print(json.dumps({"created": len(written), "ids": [w.memory_id for w in written]}, ensure_ascii=False))
+    else:
+        print(json.dumps(store.counts(config.agent_id), ensure_ascii=False))
     store.close()
     return 0
+
+
+def _cmd_tools(args: argparse.Namespace) -> int:
+    from par.execution.tools import build_toolbox
+
+    config = load_config(_config_path(args.config))
+    workspace = config.path(config.tools.workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+    box = build_toolbox(workspace, config.tools.max_file_bytes)
+    print(json.dumps(box.describe(), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    from par.evals.scenarios import run_scenarios, scenario_summary
+
+    config = load_config(_config_path(args.config))
+    report = asyncio.run(run_scenarios(config, Path(args.file)))
+    print(json.dumps(scenario_summary(report), ensure_ascii=False, indent=2))
+    return 0 if report["passed"] == report["total"] else 2
 
 
 async def _make_agent(cfg: Path, args: argparse.Namespace) -> object:
@@ -238,9 +262,17 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("action", choices=["verify", "head"])
     audit.set_defaults(func=_cmd_audit)
 
-    mem = sub.add_parser("memory", help="memory stats")
-    mem.add_argument("action", choices=["stats"])
+    mem = sub.add_parser("memory", help="memory stats / consolidation")
+    mem.add_argument("action", choices=["stats", "consolidate"])
     mem.set_defaults(func=_cmd_memory)
+
+    tools = sub.add_parser("tools", help="list builtin tools")
+    tools.add_argument("action", choices=["list"], nargs="?", default="list")
+    tools.set_defaults(func=_cmd_tools)
+
+    evals = sub.add_parser("eval", help="run offline eval scenarios")
+    evals.add_argument("--file", default="evals/scenarios.yaml")
+    evals.set_defaults(func=_cmd_eval)
 
     serve = sub.add_parser("serve", help="local web chat + OpenAI-compatible endpoint")
     serve.add_argument("--host", default="127.0.0.1")

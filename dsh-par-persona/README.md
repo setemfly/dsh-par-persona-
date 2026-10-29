@@ -7,8 +7,9 @@
 
 | 工具 | 作用 | 何时用 |
 | --- | --- | --- |
-| `par_chat` | 与林汐对话一轮，返回回复、情感标签、召回的长期记忆、审计序号 | 用户想和林汐聊天、需要她记住上下文 |
+| `par_chat` | 与林汐对话一轮，返回回复、情感标签、召回的长期记忆、审计序号，以及 `[pipeline]` 行（intent / gate / steps / deviation） | 用户想和林汐聊天、需要她记住上下文 |
 | `par_status` | 只读状态：人格名/版本、provider、回合数、9 通道情绪值、审计链头 | 汇报「她现在什么状态」 |
+| `par_tools` | 列出运行时注册的内置工具与副作用等级（`time.now` / `calc.eval` / `fs.read`） | 判断哪类请求会被规划成真实工具调用 |
 | `par_audit_verify` | 重算并校验审计哈希链；被篡改时返回 `ok:false` 和原因 | 证明记录没被动过 |
 
 ## 工作方式
@@ -41,12 +42,12 @@ DSH host 进程
 ## 安装
 
 ```bash
-# 桌面版：设置 → 插件 → 安装本地插件（选择本目录）
+# 桌面版：设置 → 插件 → 安装本地插件（选择本目录，或先 npm pack 后选 .tgz）
 # 或命令行：
 dsh plugin --profile web add <本目录>
 ```
 
-装完**重启 DSH**（包已移入 generation 目录，运行中的进程不会热换）。重启后新建会话，工具列表出现 `par_chat` / `par_status` / `par_audit_verify`。
+装完**重启 DSH**（包已移入 generation 目录，运行中的进程不会热换）。重启后新建会话，工具列表出现 `par_chat` / `par_status` / `par_tools` / `par_audit_verify`。已安装旧版本时先移除再装，否则会报 `already-installed`。
 
 卸载：桌面版插件页移除，或 `dsh plugin --profile web remove dsh-par-persona`。
 
@@ -58,7 +59,7 @@ dsh plugin --profile web add <本目录>
 node test/harness.mjs
 ```
 
-用假的 Cordis ctx 注册工具，以 `provider=fake` 拉起 sidecar，依次执行 status → chat → status → audit → render → dispose。
+用假的 Cordis ctx 注册工具，以 `provider=fake` 拉起 sidecar，依次执行 status → chat → status → audit → tools → render → dispose。
 `node_modules/@deepseek-ai/dsh-tools` 是本地 shim（只透传 `defineTool`）；真实宿主提供完整实现。
 
 ## 已知限制

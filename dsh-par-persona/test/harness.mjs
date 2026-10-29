@@ -39,9 +39,20 @@ console.log('status(after):', JSON.stringify({ turns: status1.turns, persona: st
 const audit = await tools.get('par_audit_verify').execute({}, {})
 console.log('audit:', JSON.stringify(audit))
 
-const rendered = tools.get('par_chat').output.render({}, chat)
+const renderedTools = tools.get('par_chat').output.render({}, chat)
 console.log('--- rendered par_chat ---')
-console.log(rendered[0].text)
+console.log(renderedTools[0].text)
+
+const t = await tools.get('par_tools').execute({}, {})
+console.log('--- par_tools ---')
+console.log(t.tools.map((x) => `${x.name}(${x.side_effect})`).join(', '))
+const pipeline = tools
+  .get('par_chat')
+  .output.render({}, { ...chat, intent: 'time', gate: 'allow', executed: [{ step_id: 's1', status: 'ok' }] })[0]
+  .text.split(String.fromCharCode(10))
+  .find((line) => line.startsWith('[pipeline]'))
+console.log('--- pipeline ---')
+console.log(pipeline)
 
 for (const dispose of disposers) await dispose()
 console.log('disposed')

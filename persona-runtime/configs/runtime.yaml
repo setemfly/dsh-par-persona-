@@ -12,7 +12,7 @@ user_id: "local_user"
 memory:
   recall_k: 12
   importance_floor: 0.35
-  consolidate_every_turns: 1
+  consolidate_every_turns: 20
 
 affect:
   enabled: true

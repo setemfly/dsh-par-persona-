@@ -8,12 +8,14 @@ deterministic scoring, no embeddings until an embedding provider is configured
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from par.memory.embedding import cosine, embed
 from par.schemas.core import MemoryCandidate, MemoryRecord
 
 SCHEMA = """
@@ -66,6 +68,7 @@ CREATE TABLE IF NOT EXISTS state_kv (
 );
 """
 
+W_SEMANTIC = 0.30
 W_LEXICAL = 0.35
 W_RECENCY = 0.20
 W_IMPORTANCE = 0.20
@@ -108,6 +111,7 @@ class MemoryStore:
             retention=cand.retention,
             affect_tag=cand.affect_tag,
             provenance=cand.provenance,
+            embedding=embed(cand.text),
             status="active",
             version=1,
         )
@@ -137,8 +141,8 @@ class MemoryStore:
             self._conn.execute(
                 """INSERT INTO memory (memory_id, agent_id, user_scope, tier, kind, text, entities_json,
                     occurred_at, recorded_at, valid_from, valid_to, ingested_at, importance, confidence,
-                    sensitivity, retention, affect_json, provenance_json, status, version)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    sensitivity, retention, affect_json, provenance_json, status, version, embedding_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     rec.memory_id, agent_id, rec.user_scope, rec.tier, rec.kind, rec.text,
                     json.dumps(rec.entities, ensure_ascii=False),
@@ -148,6 +152,7 @@ class MemoryStore:
                     json.dumps(rec.affect_tag or {}, ensure_ascii=False),
                     json.dumps(rec.provenance, ensure_ascii=False),
                     rec.status, rec.version,
+                    json.dumps(rec.embedding or [], ensure_ascii=False),
                 ),
             )
             self._conn.execute(
@@ -211,12 +216,15 @@ class MemoryStore:
             return []
         now = _now()
         goal_terms = [t.lower() for t in (goal_terms or [])]
+        query_vec = embed(query)
         scored: list[tuple[float, MemoryRecord]] = []
         for row in rows:
             rec = self._row_to_record(row)
             if viewer != "operator" and rec.sensitivity == "restricted":
                 continue
             lex = lexical.get(rec.memory_id, 0.0)
+            sim = max(cosine(query_vec, rec.embedding or []), 0.0)
+            lex = (1.0 - W_SEMANTIC) * lex + W_SEMANTIC * sim
             goal = 1.0 if any(t in rec.text.lower() for t in goal_terms) else 0.0
             score = (
                 W_LEXICAL * lex
@@ -230,6 +238,64 @@ class MemoryStore:
         return [rec for _, rec in scored[:k]]
 
     # ------------------------------------------------------------ commitments
+    def consolidate(
+        self,
+        agent_id: str,
+        *,
+        min_cluster: int = 2,
+        threshold: float = 0.55,
+        limit: int = 400,
+    ) -> list[MemoryRecord]:
+        """Episodic -> semantic consolidation (spec §7.4, M2).
+
+        Near-duplicate episodes (cosine on the local embedding) collapse into one
+        `reflection` record citing every source memory. Sources stay active:
+        consolidation adds a summary, it does not rewrite history.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memory WHERE agent_id=? AND status='active' AND tier='episodic'"
+                " ORDER BY occurred_at DESC LIMIT ?",
+                (agent_id, limit),
+            ).fetchall()
+        records = [self._row_to_record(r) for r in rows]
+        clusters: list[list[MemoryRecord]] = []
+        for rec in records:
+            for cluster in clusters:
+                if any(
+                    cosine(rec.embedding or [], other.embedding or []) >= threshold
+                    for other in cluster
+                ):
+                    cluster.append(rec)
+                    break
+            else:
+                clusters.append([rec])
+
+        written: list[MemoryRecord] = []
+        for cluster in clusters:
+            if len(cluster) < min_cluster:
+                continue
+            cluster.sort(key=lambda r: r.occurred_at)
+            topic = _top_terms([r.text for r in cluster])
+            sources = sorted({r.memory_id for r in cluster})
+            text = (
+                f"归纳（{len(cluster)} 条相关记忆）：围绕「{topic}」的多次交互。"
+                f"最近一次：{cluster[-1].text[:120]}"
+            )
+            cand = MemoryCandidate(
+                agent_id=agent_id,
+                tier="semantic",
+                kind="reflection",
+                text=text,
+                occurred_at=cluster[-1].occurred_at,
+                importance=max(r.importance for r in cluster),
+                confidence=0.6,
+                provenance=sources,
+                provenance_trust="self",
+            )
+            written.append(self.remember(agent_id, cand))
+        return written
+
     def upsert_commitment(
         self,
         agent_id: str,
@@ -304,6 +370,7 @@ class MemoryStore:
             sensitivity=row["sensitivity"],
             retention=row["retention"],
             affect_tag=affect or None,
+            embedding=json.loads(row["embedding_json"] or "[]") or None,
             provenance=json.loads(row["provenance_json"] or "[]"),
             status=row["status"],
             version=row["version"],
@@ -347,3 +414,13 @@ def _recency(now: datetime, rec: MemoryRecord) -> float:
     anchor = rec.occurred_at or rec.recorded_at
     days = max((now - anchor).total_seconds() / 86400.0, 0.0)
     return 1.0 / (1.0 + days / 30.0)
+
+
+def _top_terms(texts: list[str], k: int = 4) -> str:
+    """Cheap keyword summary for consolidated reflection text."""
+    counts: dict[str, int] = {}
+    for text in texts:
+        for token in re.findall(r"[\u4e00-\u9fff]{2,4}|[A-Za-z][A-Za-z0-9_]{2,}", text):
+            counts[token] = counts.get(token, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], -len(kv[0])))
+    return "、".join(term for term, _ in ranked[:k]) or "未命名的交互"
